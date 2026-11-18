@@ -1,0 +1,90 @@
+<?php
+
+namespace Tests\Feature;
+
+use App\Models\ServiceType;
+use App\Models\User;
+use Illuminate\Foundation\Testing\RefreshDatabase;
+use Tests\TestCase;
+
+class AdminAuthTest extends TestCase
+{
+    use RefreshDatabase;
+
+    public function test_admin_login_page_loads(): void
+    {
+        $response = $this->get(route('admin.login'));
+
+        $response->assertStatus(200);
+        $response->assertSee('Email Address');
+    }
+
+    public function test_admin_can_login_with_email_and_password(): void
+    {
+        $admin = User::factory()->create([
+            'email' => 'admin@tourtravel.com',
+            'password' => bcrypt('Admin@123456'),
+            'is_admin' => true,
+        ]);
+
+        $response = $this->post(route('admin.login.post'), [
+            'email' => 'admin@tourtravel.com',
+            'password' => 'Admin@123456',
+        ]);
+
+        $response->assertRedirect(route('admin.dashboard'));
+        $this->assertAuthenticatedAs($admin);
+    }
+
+    public function test_regular_user_cannot_login_to_the_admin_dashboard(): void
+    {
+        User::factory()->create([
+            'email' => 'user@tourtravel.com',
+            'password' => bcrypt('User@123456'),
+            'is_admin' => false,
+        ]);
+
+        $this->post(route('admin.login.post'), [
+            'email' => 'user@tourtravel.com',
+            'password' => 'User@123456',
+        ])
+            ->assertRedirect('/admin/login')
+            ->assertSessionHasErrors('email');
+
+        $this->assertGuest();
+    }
+
+    public function test_non_admin_cannot_access_dashboard(): void
+    {
+        $user = User::factory()->create(['is_admin' => false]);
+
+        $this->actingAs($user)->get(route('admin.dashboard'))->assertForbidden();
+    }
+
+    public function test_admin_dashboard_loads_with_permission_tables(): void
+    {
+        $admin = User::factory()->create(['is_admin' => true]);
+        ServiceType::create([
+            'name' => 'Airport Transfer',
+            'slug' => 'airport-transfer',
+            'status' => 'active',
+        ]);
+        ServiceType::create([
+            'name' => 'Old Transfer',
+            'slug' => 'old-transfer',
+            'status' => 'inactive',
+        ]);
+
+        $this->actingAs($admin)
+            ->get(route('admin.dashboard'))
+            ->assertOk()
+            ->assertSee('Service Types')
+            ->assertSee(route('admin.service-types.index'))
+            ->assertSee('<p class="text-2xl font-bold mt-1">1</p>', false);
+    }
+
+    public function test_guest_is_redirected_from_dashboard(): void
+    {
+        $this->get(route('admin.dashboard'))->assertRedirect('/admin/login');
+    }
+}
